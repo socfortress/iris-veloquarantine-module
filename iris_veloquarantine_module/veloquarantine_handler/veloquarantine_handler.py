@@ -28,6 +28,7 @@ class VeloquarantineHandler(object):
         self.server_config = server_config
         self.veloquarantine = self.get_veloquarantine_instance()
         self.log = logger
+        self.config = pyvelociraptor.LoadConfigFile(self.mod_config.get('velo_api_config'))
 
     def get_veloquarantine_instance(self):
         """
