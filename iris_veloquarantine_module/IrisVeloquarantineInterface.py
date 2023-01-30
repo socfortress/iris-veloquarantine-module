@@ -106,6 +106,10 @@ class IrisVeloquarantineInterface(IrisModuleInterface):
                 status = veloquarantine_handler.handle_linux(asset=asset)
                 in_status = InterfaceStatus.merge_status(in_status, status)
 
+            if 'Windows -' in asset.asset_type.asset_name:
+                status = veloquarantine_handler.handle_windows(asset=asset)
+                in_status = InterfaceStatus.merge_status(in_status, status)
+
             #elif element.ioc_type.type_name in ['md5', 'sha224', 'sha256', 'sha512']:
             #    status = veloquarantine_handler.handle_hash(ioc=element)
             #    in_status = InterfaceStatus.merge_status(in_status, status)
