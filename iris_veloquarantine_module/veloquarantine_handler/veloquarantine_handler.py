@@ -193,6 +193,11 @@ class VeloquarantineHandler(object):
                             time.sleep(5)
                             print(state)
                             break
+                        if state == "ERROR":
+                            asset.asset_tags = f"{asset.asset_tags},quarantined:yes"
+                            time.sleep(5)
+                            print(state)
+                            break
                 except Exception:
                     pass
 
