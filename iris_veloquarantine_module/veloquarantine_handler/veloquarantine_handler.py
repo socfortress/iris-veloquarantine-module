@@ -12,8 +12,14 @@
 import traceback
 from jinja2 import Template
 
+import json
+import time
+
+# Imports for datastore handling
+import grpc
 import iris_interface.IrisInterfaceStatus as InterfaceStatus
-from app.datamgmt.manage.manage_attribute_db import add_tab_attribute_field
+import pyvelociraptor
+from pyvelociraptor import api_pb2, api_pb2_grpc
 
 
 class VeloquarantineHandler(object):
@@ -69,39 +75,124 @@ class VeloquarantineHandler(object):
 
         return InterfaceStatus.I2Success(data=rendered)
 
-    def handle_domain(self, ioc):
+    def handle_linux(self, asset):
         """
-        Handles an IOC of type domain and adds VT insights
-
-        :param ioc: IOC instance
+        Handles an Asset and Quarantines the endpoint via Velociraptor
+        :param asset: ASSET instance
         :return: IIStatus
         """
 
-        self.log.info(f'Getting domain report for {ioc.ioc_value}')
+        self.log.info(f"Running Quarantine for {asset.asset_name}")
 
-        # TODO! do your stuff, then report it to the element (here an IOC)
+        creds = grpc.ssl_channel_credentials(
+            root_certificates=self.config["ca_certificate"].encode("utf8"),
+            private_key=self.config["client_private_key"].encode("utf8"),
+            certificate_chain=self.config["client_cert"].encode("utf8"),
+        )
 
-        if self.mod_config.get('veloquarantine_report_as_attribute') is True:
-            self.log.info('Adding new attribute veloquarantine Domain Report to IOC')
+        options = (("grpc.ssl_target_name_override", "VelociraptorServer"),)
 
-            report = ["<TODO> report from veloquarantine"]
+        with grpc.secure_channel(
+            self.config["api_connection_string"],
+            creds,
+            options,
+        ) as channel:
+            stub = api_pb2_grpc.APIStub(channel)
 
-            status = self.gen_domain_report_from_template(self.mod_config.get('veloquarantine_domain_report_template'), report)
+            client_query = (
+                "select client_id from clients(search='host:" + asset.asset_name + "')"
+            )
+            print(asset.asset_name)
 
-            if not status.is_success():
-                return status
+            # Send initial request
+            print("Sending client request - soc.")
+            client_request = api_pb2.VQLCollectorArgs(
+                max_wait=1,
+                Query=[
+                    api_pb2.VQLRequest(
+                        Name="ClientQuery",
+                        VQL=client_query,
+                    ),
+                ],
+            )
 
-            rendered_report = status.get_data()
+            for client_response in stub.Query(client_request):
+                try:
+                    client_results = json.loads(client_response.Response)
+                    global client_id
+                    client_id = client_results[0]["client_id"]
+                    print(client_id)
+                except Exception:
+                    self.log.info({"message": "Could not find a suitable client."})
+                    pass
 
-            try:
-                add_tab_attribute_field(ioc, tab_name='veloquarantine Report', field_name="HTML report", field_type="html",
-                                        field_value=rendered_report)
+            # Define initial query
+            init_query = (
+                'SELECT collect_client(client_id="'
+                + client_id
+                + '", artifacts=["Linux.Remediation.Quarantine"],'
+                " spec=dict(`Linux.Remediation.Quarantine`=dict())) FROM scope()"
+            )
 
-            except Exception:
+            # Send initial request
+            print("Sending initial request - soc")
+            request = api_pb2.VQLCollectorArgs(
+                max_wait=1,
+                Query=[
+                    api_pb2.VQLRequest(
+                        Name="Query",
+                        VQL=init_query,
+                    ),
+                ],
+            )
 
-                self.log.error(traceback.format_exc())
-                return InterfaceStatus.I2Error(traceback.format_exc())
-        else:
-            self.log.info('Skipped adding attribute report. Option disabled')
+            for response in stub.Query(request):
+                try:
+                    init_results = json.loads(response.Response)
+                    flow = list(init_results[0].values())[0]
+                    print("made it to loop")
+                    flow_id = str(flow["flow_id"])
+                    print(init_results)
+                    # Define second query
+                    flow_query = (
+                        "SELECT * from flows(client_id='"
+                        + str(flow["request"]["client_id"])
+                        + "', flow_id='"
+                        + flow_id
+                        + "')"
+                    )
+                    print(flow_query)
+                    state = "RUNNING"
+
+                    # Check to see if the flow has completed
+                    while state != "FINISHED":
+                        followup_request = api_pb2.VQLCollectorArgs(
+                            max_wait=10,
+                            Query=[
+                                api_pb2.VQLRequest(
+                                    Name="QueryForFlow",
+                                    VQL=flow_query,
+                                ),
+                            ],
+                        )
+
+                        for followup_response in stub.Query(followup_request):
+                            try:
+                                flow_results = json.loads(followup_response.Response)
+                            except Exception:
+                                pass
+                        state = flow_results[0]["state"]
+                        print(state)
+                        global artifact_results
+                        artifact_results = flow_results[0]["artifacts_with_results"]
+                        self.log.info({"message": state})
+                        time.sleep(1.0)
+                        if state == "FINISHED":
+                            asset.asset_tags = f"{asset.asset_tags},quarantined:yes"
+                            time.sleep(5)
+                            print(state)
+                            break
+                except Exception:
+                    pass
 
         return InterfaceStatus.I2Success()
