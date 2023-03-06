@@ -25,7 +25,7 @@ module_configuration = [
             "Specify the full path to the API config file (yaml) to be used by"
             " pyvelociraptor. This must be accessible from the DFIR-IRIS container"
         ),
-        "default": None,
+        "default": "/iriswebapp/api.config.yaml",
         "mandatory": True,
         "type": "string",
     },
