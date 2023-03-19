@@ -102,7 +102,7 @@ class IrisVeloquarantineInterface(IrisModuleInterface):
 
         for asset in data:
             # Check that the IOC we receive is of type the module can handle and dispatch
-            if 'Linux - Computer' in asset.asset_type.asset_name:
+            if 'Linux -' in asset.asset_type.asset_name:
                 status = veloquarantine_handler.handle_linux(asset=asset)
                 in_status = InterfaceStatus.merge_status(in_status, status)
 
